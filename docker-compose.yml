@@ -1,0 +1,84 @@
+version: "3.8"
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: prod
+      args:
+        NODE_VERSION: 23.9.0
+    container_name: jitterbox
+    environment:
+      OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: grpc
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: http://otel:4317
+      OTEL_EXPORTER_OTLP_METRICS_ENDPOINT: http://otel:4318
+      OTEL_RESOURCE_ATTRIBUTES: service.name=my-service,service.version=1.2.3
+    ports:
+      - "3000:3000"
+    restart: unless-stopped
+    user: "1000:1000"  # node user
+    working_dir: /usr/src/app
+    mem_limit: 256m
+    cpus: "0.5"
+  
+  # cadvisor:
+  #   image: gcr.io/cadvisor/cadvisor:latest
+  #   container_name: cadvisor
+  #   ports:
+  #     - "8080:8080"
+  #   volumes:
+  #     - /:/rootfs:ro
+  #     - /var/run:/var/run:ro
+  #     - /sys:/sys:ro
+  #     - /var/lib/docker/:/var/lib/docker:ro
+  #   restart: unless-stopped
+  #   mem_limit: 128m
+  #   cpus: "0.25"
+
+  otel: 
+    image: otel/opentelemetry-collector-contrib:latest 
+    container_name: otel 
+    volumes:
+      - ./otel-collector-config.yaml:/etc/otelcol-contrib/config.yaml
+      - /tmp/logs:/etc/logs:rw
+    ports:
+    - 1888:1888 # pprof extension
+    - 8888:8888 # Prometheus metrics exposed by the Collector
+    - 8889:8889 # Prometheus exporter metrics
+    - 13133:13133 # health_check extension
+    - 4317:4317 # OTLP gRPC receiver
+    - 4318:4318 # OTLP http receiver
+    - 55679:55679 # zpages extension
+
+  loki:
+    image: grafana/loki:3.4.2
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+  
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3001:3000"
+    volumes:
+      - grafana-data:/var/lib/grafana
+    restart: unless-stopped
+
+  # # Prometheus for metrics
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+
+volumes:
+  grafana-data:
+  shared-logs:
